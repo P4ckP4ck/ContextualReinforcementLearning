@@ -80,26 +80,31 @@ class crl():
     def network_perturbed(self):
         out = []
         inp = Input((self.state_dim))
-        for _ in range(self.layers):
-            x = Dense(self.nodes, activation='relu')(inp)
+        x = Dense(self.nodes, activation='relu')(inp)
+        x = GaussianNoise(self.std_var)(x, training = True)
+        x = LayerNormalization()(x)
+        for _ in range(self.layers - 1):
+            x = Dense(self.nodes, activation='relu')(x)
             x = GaussianNoise(self.std_var)(x, training = True)
             x = LayerNormalization()(x)
         for i in range(self.actions):
             out.append(Dense(self.atoms, activation='softmax')(x))
         M = Model(inp, out)
-        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9),loss="categorical_crossentropy")
+        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
         return M
 
     def network_unperturbed(self):
         out = []
         inp = Input((self.state_dim))
-        for _ in range(self.layers):
-            x = Dense(self.nodes, activation='relu')(inp)
+        x = Dense(self.nodes, activation='relu')(inp)
+        x = LayerNormalization()(x)
+        for _ in range(self.layers - 1):
+            x = Dense(self.nodes, activation='relu')(x)
             x = LayerNormalization()(x)
         for i in range(self.actions):
             out.append(Dense(self.atoms, activation='softmax')(x))
         M = Model(inp, out)
-        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9),loss="categorical_crossentropy")
+        M.compile(optimizer = SGD(self.learning_rate, momentum = 0.9), loss = "categorical_crossentropy")
         return M
     
     def calc_action(self, state):
@@ -176,7 +181,7 @@ class crl():
         log, soc = [], []
         cum_r = 0
         for i in range(960):
-            action = actor.calc_unperturbed_action(np.expand_dims(state, axis = 0))
+            action = self.calc_unperturbed_action(np.expand_dims(state, axis = 0))
             state, r, done, _ = test_env.step(action) 
             log.append([action, state[0], state[1], state[2], r])
             soc.append(state[0])
@@ -186,35 +191,32 @@ class crl():
             self.high_score = cum_r
             self.actor_target.save_weights(f"high_score_weights_{cum_r}.h5")
         pd.DataFrame(soc).plot()
-        pd.DataFrame(np.squeeze(actor.actor_target.predict(np.expand_dims(state, axis = 0)))).T.plot(kind = "bar", subplots = True)
+        pd.DataFrame(np.squeeze(self.actor_target.predict(np.expand_dims(state, axis = 0)))).T.plot(kind = "bar", subplots = True)
         plt.show()
         plt.close()
         if LOGFILE:
             xls = pd.DataFrame(log)
             xls.to_excel("results_log_ddpg.xls")
 
-actor = crl()
-actor.load_weights(WEIGHTS_PATH)
-env = ems_env.ems(EP_LEN)
-cumul_r = 0
-for ep in tqdm(range(EPISODES)):
-    done = False
-    ep_r = 0
-    state = env.reset()
-    while not done:
-        prior_state = state      
-        action = actor.epsilon_greedy(actor.calc_action(np.expand_dims(state, axis = 0)))
-        state, r, done, _ = env.step(action)        
-        cumul_r += r
-        ep_r += r
-        actor.memory.append([prior_state, action, r]) 
-        batch = np.array(random.sample(actor.memory, min(BATCH_SIZE, len(actor.memory))))    
-        actor.train(batch)
-        actor.soft_update_actor_target()
-    tqdm.write(f"\n--------------------------\n Episode: {ep+1}/{EPISODES} \n Epsilon: {np.round(actor.epsilon, 2)} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
-    if not (ep+1) % PRINT_EVERY_X_ITER:
-        actor.plot_test()
-        
-
-    
-    
+if __name__ == "__main__":
+    actor = crl()
+    actor.load_weights(WEIGHTS_PATH)
+    env = ems_env.ems(EP_LEN)
+    cumul_r = 0
+    for ep in tqdm(range(EPISODES)):
+        done = False
+        ep_r = 0
+        state = env.reset()
+        while not done:
+            prior_state = state      
+            action = actor.epsilon_greedy(actor.calc_action(np.expand_dims(state, axis = 0)))
+            state, r, done, _ = env.step(action)        
+            cumul_r += r
+            ep_r += r
+            actor.memory.append([prior_state, action, r]) 
+            batch = np.array(random.sample(actor.memory, min(BATCH_SIZE, len(actor.memory))))    
+            actor.train(batch)
+            actor.soft_update_actor_target()
+        tqdm.write(f"\n--------------------------\n Episode: {ep+1}/{EPISODES} \n Epsilon: {np.round(actor.epsilon, 2)} \n Cumulative Reward: {cumul_r} \n Episodic Reward: {ep_r}\n Current Std: {actor.std}")
+        if not (ep+1) % PRINT_EVERY_X_ITER:
+            actor.plot_test()
