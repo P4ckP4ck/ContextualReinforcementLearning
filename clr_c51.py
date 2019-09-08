@@ -2,7 +2,7 @@
 """
 Created on Thu Sep  5 17:43:44 2019
 
-@author: patri
+@author: Patrick Lehnen
 """
 import random
 import math
